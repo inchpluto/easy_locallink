@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+LocalLinkData/
+.ui-test/
+build/
+dist/
+android/.gradle/
+android/app/build/
+android/local.properties
