@@ -40,6 +40,7 @@ final class MobileHostServer {
     private final Object storeLock = new Object();
     private final ArrayList<JSONObject> records = new ArrayList<>();
     private final ExecutorService clients = Executors.newCachedThreadPool();
+    private final PairingThrottle throttle = new PairingThrottle();
     private volatile boolean running;
     private ServerSocket socket;
 
@@ -95,7 +96,22 @@ final class MobileHostServer {
             if (path.equals("/api/health")) { sendJson(out, 200, health()); return; }
             if (path.equals("/") || path.equals("/index.html")) { sendAsset(out, "index.html"); return; }
             if (path.startsWith("/static/")) { sendAsset(out, path.substring(8)); return; }
-            if (!authorized(target, headers)) { sendError(out, 401, "配对码错误"); return; }
+            // Refuse before comparing: a throttled source must not keep trying
+            // codes just because it is willing to sit through the backoff.
+            String source = closeable.getInetAddress() == null ? "" : closeable.getInetAddress().getHostAddress();
+            throttle.waitOut(source);
+            int cooldown = throttle.retryAfter(source);
+            if (cooldown > 0) {
+                throttle.record(source, false);
+                sendText(out, 429, "Too Many Requests", "application/json; charset=utf-8",
+                        new JSONObject().put("ok", false).put("error", "配对尝试过于频繁，请稍后重试")
+                                .toString().getBytes(StandardCharsets.UTF_8),
+                        Collections.singletonMap("Retry-After", String.valueOf(cooldown)));
+                return;
+            }
+            boolean allowed = authorized(target, headers);
+            throttle.record(source, allowed);
+            if (!allowed) { sendError(out, 401, "配对码错误"); return; }
             if (method.equals("GET") && path.equals("/api/status")) { sendJson(out, 200, status()); return; }
             if (method.equals("POST") && path.equals("/api/scan")) { LocalLinkService.scanSubnet(); sendJson(out, 202, new JSONObject().put("ok", true).put("started", true)); return; }
             if (method.equals("POST") && path.equals("/api/text")) { addText(out, in, headers); return; }
@@ -125,7 +141,7 @@ final class MobileHostServer {
         return new JSONObject().put("ok", true).put("device", deviceName).put("ip", ip).put("port", PORT)
             .put("pairing_code", pairingCode).put("device_id", LocalLinkService.deviceId()).put("share_url", "http://" + ip + ":" + PORT + "/?code=" + pairingCode)
             .put("network", new JSONObject().put("vpn_detected", false).put("lan_state", "ok").put("firewall", "not_required").put("message", "Android 本机收件箱正在运行"))
-            .put("peers", LocalLinkService.peersJson()).put("storage", new JSONObject().put("items", history.length()).put("files", fileCount).put("bytes", bytes).put("bytes_human", humanSize(bytes)))
+            .put("peers", LocalLinkService.peersJson()).put("auth", throttle.snapshot()).put("storage", new JSONObject().put("items", history.length()).put("files", fileCount).put("bytes", bytes).put("bytes_human", humanSize(bytes)))
             .put("history", history);
     }
 
@@ -206,7 +222,8 @@ final class MobileHostServer {
     private void sendAsset(BufferedOutputStream out,String name)throws Exception{if(!isBundledAsset(name)){sendError(out,404,"未找到");return;}AssetManager assets=context.getAssets();try(InputStream in=assets.open(name);ByteArrayOutputStream data=new ByteArrayOutputStream()){byte[] buffer=new byte[16384];int read;while((read=in.read(buffer))>=0)data.write(buffer,0,read);sendText(out,200,"OK",mime(name),data.toByteArray());}}
     private void sendJson(BufferedOutputStream out,int status,JSONObject json)throws Exception{sendText(out,status,status<300?"OK":"Error","application/json; charset=utf-8",json.toString().getBytes(StandardCharsets.UTF_8));}
     private void sendError(BufferedOutputStream out,int status,String message)throws Exception{sendJson(out,status,new JSONObject().put("ok",false).put("error",message));}
-    private void sendText(BufferedOutputStream out,int status,String reason,String type,byte[] body)throws Exception{sendHeaders(out,status,reason,type,body.length,Collections.emptyMap());out.write(body);out.flush();}
+    private void sendText(BufferedOutputStream out,int status,String reason,String type,byte[] body)throws Exception{sendText(out,status,reason,type,body,Collections.emptyMap());}
+    private void sendText(BufferedOutputStream out,int status,String reason,String type,byte[] body,Map<String,String> extra)throws Exception{sendHeaders(out,status,reason,type,body.length,extra);out.write(body);out.flush();}
     private void sendHeaders(BufferedOutputStream out,int status,String reason,String type,long length,Map<String,String> extra)throws Exception{StringBuilder value=new StringBuilder("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\nContent-Type: ").append(type).append("\r\nContent-Length: ").append(length).append("\r\nCache-Control: no-store\r\nConnection: close\r\n");for(Map.Entry<String,String> item:extra.entrySet())value.append(item.getKey()).append(": ").append(item.getValue()).append("\r\n");value.append("\r\n");out.write(value.toString().getBytes(StandardCharsets.ISO_8859_1));}
     private static String readLine(InputStream in)throws Exception{ByteArrayOutputStream data=new ByteArrayOutputStream();int previous=-1,current;while((current=in.read())>=0){if(previous=='\r'&&current=='\n'){byte[] raw=data.toByteArray();return new String(raw,0,Math.max(0,raw.length-1),StandardCharsets.ISO_8859_1);}data.write(current);previous=current;if(data.size()>16384)throw new IllegalArgumentException("header too large");}return data.size()==0?null:data.toString("ISO-8859-1");}
     private static long contentLength(Map<String,String> headers){try{return Long.parseLong(headers.getOrDefault("content-length","-1"));}catch(Exception error){return -1;}}

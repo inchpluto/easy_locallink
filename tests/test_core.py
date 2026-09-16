@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,7 +30,8 @@ class CoreTests(unittest.TestCase):
         with patch("locallink.__main__.shutil.which", return_value=None), patch.dict(
             "os.environ", {"LOCALAPPDATA": r"C:\Users\tester\AppData\Local"}, clear=True
         ), patch("locallink.__main__.Path.is_file", return_value=True):
-            self.assertTrue(find_adb().endswith(r"Android\Sdk\platform-tools\adb.exe"))
+            expected_tail = os.path.join("Android", "Sdk", "platform-tools", "adb.exe")
+            self.assertTrue(find_adb().endswith(expected_tail))
 
     def test_store_text_and_file_persists(self):
         with tempfile.TemporaryDirectory() as folder:

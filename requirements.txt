@@ -1,0 +1,14 @@
+# LocalLink Python dependencies
+#
+# The transfer host itself (``python -m locallink``) is stdlib only — it needs
+# nothing from this file.  The tests are stdlib ``unittest`` too, so
+# ``python -m unittest discover -s tests`` runs on a bare Python 3.10+ install.
+
+# Desktop console (``python -m locallink.desktop``): embedded Chromium window,
+# system tray and WebChannel bridge.  Also required by the PyInstaller specs
+# and by packaging_runtime.py, which relocates the Qt Windows runtime.
+PySide6>=6.6
+
+# Not a pip dependency, listed for completeness: Office -> PDF preview shells
+# out to a local LibreOffice (``soffice``).  Without it the ``preview_convert``
+# capability is simply omitted from file records.

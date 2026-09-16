@@ -1,4 +1,6 @@
 import json
+import re
+import socket
 import tempfile
 import threading
 import unittest
@@ -6,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from locallink.core import PairingThrottle
 from locallink.server import create_server
 
 
@@ -187,6 +190,245 @@ class ServerTests(unittest.TestCase):
         finally:
             first.server_close()
             second.server_close()
+
+
+class PreviewConfinementTests(unittest.TestCase):
+    """Inline previews share the console origin, so they must not run scripts."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.server = create_server(Path(self.temp.name), "127.0.0.1", 0, "Test PC", "123456")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def upload(self, name: str, payload: bytes) -> str:
+        request = urllib.request.Request(
+            self.base + "/api/upload?code=123456", data=payload, method="POST",
+            headers={"X-Filename": name, "Content-Length": str(len(payload))},
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return json.loads(response.read())["item"]["id"]
+
+    def preview(self, identifier: str, extra: str = ""):
+        with urllib.request.urlopen(f"{self.base}/api/preview/{identifier}?code=123456{extra}", timeout=3) as response:
+            return response.read(), response.headers
+
+    def test_svg_preview_is_confined_to_a_sandboxed_origin(self):
+        payload = b'<svg xmlns="http://www.w3.org/2000/svg" onload="fetch(\'/api/status\')"></svg>'
+        identifier = self.upload("invite.svg", payload)
+
+        body, headers = self.preview(identifier)
+
+        self.assertEqual(body, payload)
+        self.assertEqual(headers.get_content_type(), "image/svg+xml")
+        self.assertEqual(headers["Content-Security-Policy"], "sandbox")
+        self.assertTrue(headers["Content-Disposition"].startswith("inline;"))
+
+    def test_html_preview_downloads_instead_of_rendering(self):
+        identifier = self.upload("page.html", b"<script>alert(1)</script>")
+
+        _, headers = self.preview(identifier)
+
+        self.assertEqual(headers.get_content_type(), "text/html")
+        self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+        self.assertNotIn("Content-Security-Policy", headers)
+
+    def test_office_pdf_preview_is_sandboxed(self):
+        self.server.preview_service = FakePreviewService(Path(self.temp.name))
+        identifier = self.upload("quarterly.pptx", b"fake-presentation")
+
+        body, headers = self.preview(identifier, extra="&format=pdf")
+
+        self.assertEqual(body, b"%PDF-local-link")
+        self.assertEqual(headers.get_content_type(), "application/pdf")
+        self.assertEqual(headers["Content-Security-Policy"], "sandbox")
+
+
+class KeepAliveFramingTests(unittest.TestCase):
+    """A client that over-sends must not corrupt the next pipelined request."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.server = create_server(Path(self.temp.name), "127.0.0.1", 0, "Test PC", "123456")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.port = self.server.server_port
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    @staticmethod
+    def statuses(response: bytes) -> list[bytes]:
+        # Response bodies carry no trailing CRLF, so status lines are searched
+        # for anywhere in the stream instead of being split per line.
+        return re.findall(rb"HTTP/1\.1 \d{3} [^\r\n]*", response)
+
+    def _exchange(self, raw: bytes, timeout: float = 10.0) -> bytes:
+        """Send one blob (so both requests are pipelined) and read to EOF."""
+        connection = socket.create_connection(("127.0.0.1", self.port), timeout=timeout)
+        connection.settimeout(timeout)
+        try:
+            connection.sendall(raw)
+            connection.shutdown(socket.SHUT_WR)
+            response = b""
+            while True:
+                data = connection.recv(65536)
+                if not data:
+                    break
+                response += data
+            return response
+        finally:
+            connection.close()
+
+    def test_pipelined_request_survives_a_body_the_handler_rejected(self):
+        # A bad X-SHA256 aborts the handler before it reads the body.  The
+        # declared bytes are still drained, so the pipelined request is parsed.
+        upload = (
+            b"POST /api/upload?code=123456 HTTP/1.1\r\n"
+            b"Host: test\r\nContent-Length: 4\r\n"
+            b"X-Filename: bad.bin\r\nX-SHA256: nope\r\n\r\nabcd"
+        )
+        follow_up = b"GET /api/health HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+
+        response = self._exchange(upload + follow_up)
+
+        self.assertEqual(self.statuses(response), [b"HTTP/1.1 400 Bad Request", b"HTTP/1.1 200 OK"], response[:400])
+        self.assertIn(b'"service": "locallink"', response)
+
+    def test_pipelined_request_survives_an_undeclared_json_tail(self):
+        payload = json.dumps({"text": "hello", "sender": "Phone"}).encode()
+        request = (
+            b"POST /api/text?code=123456 HTTP/1.1\r\n"
+            b"Host: test\r\nContent-Length: " + str(len(payload)).encode() + b"\r\n"
+            b"Content-Type: application/json\r\n\r\n" + payload + b"TRAILINGGARBAGE"
+        )
+        follow_up = b"GET /api/health HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+
+        response = self._exchange(request + follow_up)
+
+        self.assertIn(b"HTTP/1.1 201 Created", response)
+        # The undeclared tail is not consumed, so the connection is torn down
+        # after rejecting it: it must never be mistaken for a real request.
+        self.assertNotIn(b'"service"', response)
+
+    def test_oversized_body_never_yields_a_second_valid_response(self):
+        upload = (
+            b"POST /api/upload?code=123456 HTTP/1.1\r\n"
+            b"Host: test\r\nContent-Length: 100\r\n"
+            b"X-Filename: lying.bin\r\nX-Sender: probe\r\n\r\n" + b"A" * 5000
+        )
+        follow_up = b"GET /api/status?code=123456 HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+
+        response = self._exchange(upload + follow_up)
+
+        # Before the fix the leftover body bytes were parsed as a request line
+        # and answered with a 501 carrying the raw payload.  Either way the
+        # misframed client must not reach an authenticated endpoint.
+        self.assertIn(b"HTTP/1.1 201 Created", response)
+        self.assertNotIn(b"HTTP/1.1 200 OK", response)
+        self.assertNotIn(b'"pairing_code"', response)
+
+
+class PairingThrottleEndpointTests(unittest.TestCase):
+    """Guessing the pairing code over real HTTP must slow down and then stop."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.server = create_server(
+            Path(self.temp.name), "127.0.0.1", 0, "Test PC", "123456",
+            throttle=PairingThrottle(free_attempts=2, base_delay=0.05, max_delay=0.2),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def attempt(self, code: str):
+        try:
+            with urllib.request.urlopen(f"{self.base}/api/status?code={code}", timeout=5) as response:
+                return response.status, response.headers
+        except urllib.error.HTTPError as error:
+            return error.code, error.headers
+
+    def test_wrong_codes_are_throttled_with_retry_after(self):
+        # free_attempts=2: tries 1 and 2 are answered, try 3 is refused.
+        self.assertEqual(self.attempt("000000")[0], 401)
+        self.assertEqual(self.attempt("000001")[0], 401)
+
+        status, headers = self.attempt("000002")
+
+        self.assertEqual(status, 429)
+        self.assertGreaterEqual(int(headers["Retry-After"]), 1)
+        # The refusal is itself recorded, so the backoff keeps growing.
+        self.assertEqual(self.server.throttle.snapshot()["failed_attempts"], 3)
+
+    def test_throttled_source_still_cannot_reach_the_right_code(self):
+        for code in ("000000", "000001", "000002"):
+            self.attempt(code)
+        self.assertGreater(self.server.throttle.retry_after("127.0.0.1"), 0)
+
+        status, _ = self.attempt("123456")
+
+        # The correct code is not even compared once the source is throttled.
+        self.assertEqual(status, 429)
+
+    def test_the_correct_code_resets_the_counter(self):
+        # Still inside free_attempts, so the code is compared.
+        self.assertEqual(self.attempt("000000")[0], 401)
+
+        status, _ = self.attempt("123456")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(self.server.throttle.snapshot()["throttled_sources"], 0)
+
+    def test_429_leaves_the_connection_usable_or_cleanly_closed(self):
+        payload = json.dumps({"text": "hi", "sender": "Phone"}).encode()
+        for _ in range(3):
+            self.attempt("000000")
+        request = (
+            b"POST /api/text?code=000000 HTTP/1.1\r\n"
+            b"Host: test\r\nContent-Length: " + str(len(payload)).encode() + b"\r\n"
+            b"Content-Type: application/json\r\n\r\n" + payload
+            + b"GET /api/health HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+        )
+
+        connection = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=10)
+        connection.settimeout(10)
+        try:
+            connection.sendall(request)
+            connection.shutdown(socket.SHUT_WR)
+            response = b""
+            while True:
+                data = connection.recv(65536)
+                if not data:
+                    break
+                response += data
+        finally:
+            connection.close()
+
+        self.assertIn(b"HTTP/1.1 429", response)
+        self.assertIn(b"Retry-After:", response)
+        # The unread body must never be parsed as a request line.
+        self.assertNotIn(b"501 Unsupported method", response)
+
+    def test_status_reports_auth_counters(self):
+        self.attempt("000000")
+        with urllib.request.urlopen(f"{self.base}/api/status?code=123456", timeout=5) as response:
+            body = json.loads(response.read())
+
+        self.assertEqual(body["auth"], {"failed_attempts": 1, "throttled_sources": 0})
 
 
 if __name__ == "__main__":

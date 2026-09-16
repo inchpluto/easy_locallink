@@ -1,5 +1,7 @@
 # LocalLink
 
+[简体中文](README.md) | [English](README.en.md)
+
 LocalLink 是一个不经过互联网的设备传输工具。Windows 与 Android 都可以成为局域网主机；手机、电脑可直接互相发现并发送文件、图片、链接和文字。
 
 ## 交付文件
@@ -143,7 +145,11 @@ Android 2.4 的 `53317` 端口默认用于手机本机收件箱。USB/ADB 反向
 
 ## 源码运行
 
-要求 Python 3.10+：
+要求 Python 3.10+。传输主机只用标准库；桌面控制台还需要 `requirements.txt` 中的依赖：
+
+```powershell
+python -m pip install -r requirements.txt
+```
 
 ```powershell
 python -m locallink --list-interfaces
@@ -173,9 +179,27 @@ Android 工程的 `local.properties` 是本机 SDK 路径，仅用于当前开�
 
 ## 测试
 
+Python 服务端（仅依赖标准库，无需 pytest）：
+
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+前端状态机与界面模型（需要 Node.js）：
+
+```powershell
+node tests/connection_state.test.mjs
+node tests/web_ui.test.mjs
+```
+
+Android 单元测试：
+
+```powershell
+cd android
+gradle --no-daemon testDebugUnitTest
+```
+
+三者均由 [`.github/workflows/tests.yml`](.github/workflows/tests.yml) 在 push 与 Pull Request 时自动执行。
 
 协议细节与安全边界见 [protocol/protocol.md](protocol/protocol.md)。
 
