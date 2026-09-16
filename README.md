@@ -5,8 +5,8 @@ LocalLink 是一个不经过互联网的设备传输工具。Windows 与 Android
 ## 交付文件
 
 - Windows 便携单文件：`dist/LocalLink-Portable.exe`
-- Windows 目录版：`dist/LocalLink-2.0/LocalLink-2.0.exe`
-- Android 2.0 APK：`dist/LocalLink-Android-2.0-debug.apk`
+- Windows 2.4.4 单文件：`dist/2.4.4/LocalLink-Portable.exe`
+- Android 2.4.4 APK：`dist/2.4.4/LocalLink-Android-2.4.4-debug.apk`
 
 Windows EXE 与 APK 当前均为未签名/开发签名构建，适合个人设备测试。公开分发前应配置代码签名证书和 Android release keystore。
 
@@ -18,7 +18,9 @@ Windows EXE 与 APK 当前均为未签名/开发签名构建，适合个人设�
 - 大文件流式写入，不一次性载入服务端内存
 - SHA-256 完整性校验和失败临时文件清理
 - HTTP Range 断点下载
-- 传输记录、搜索、类型筛选、复制、下载和删除
+- 传输记录、搜索、类型筛选、全文阅读、复制、预览、打开、下载和删除
+- 长文本三行换行摘要，文件名和操作区可响应式折行，不再挤出页面
+- Windows 安装 LibreOffice 后可把 Word、Excel、PPT 转为缓存 PDF 在线预览
 - 6 位进程级配对码
 - 文件名净化和目录穿越防护
 - 本地存储数量与空间统计
@@ -37,12 +39,13 @@ Windows EXE 与 APK 当前均为未签名/开发签名构建，适合个人设�
 - EXE 是默认传输主机，双击后自动识别 LAN 地址并立即监听 `53317`
 - 默认配对码为 `123456`，无需再运行 `python -m locallink`
 - 内嵌 Chromium 传输控制台，无需额外打开浏览器
+- “打开”只按记录 ID 解析本地文件并交给 Windows 默认应用，网页不能传入任意路径
 - 文件下载保存对话框
 - 关闭窗口时停止服务并清理 ADB reverse
 
 ### Android APP
 
-- Android 2.2 内置本地主机和独立收件箱，不再依赖 Windows
+- Android 2.4 内置本地主机和独立收件箱，不再依赖 Windows
 - 原生设备主页压缩为单屏，手动连接表单按需展开
 - 收件箱采用“主页 / 发送 / 记录 / 设备”底部导航，不再把所有功能纵向堆叠
 - 使用统一的 LocalLink 蓝色应用图标（Windows EXE 与 Android APP）
@@ -50,6 +53,12 @@ Windows EXE 与 APK 当前均为未签名/开发签名构建，适合个人设�
 - 二维码完全离线生成，手机相机扫码即可打开局域网连接地址
 - 连接过的设备可保存为可信设备快捷入口（本地保存，不代表 3.0 的加密身份认证）
 - 文字、图片、音视频、PDF 与常见文本文件支持直接预览
+- Word、Excel、PPT 可下载到应用缓存后交给兼容应用打开
+- APK 经包校验、LocalLink 风险确认和 Android 系统安装确认后可安装；不支持静默安装
+- 连接经过服务识别、配对码认证和可信设备 ID 核对；身份变化时在认证成功后提示重新信任，不再永久阻断升级后的设备
+- 可信设备以稳定 ID 为主键，Wi-Fi 重连或 DHCP 改变 IP 后自动刷新地址，并保留各设备独立的配对码
+- 从长时间离线恢复时连接预检会有限重试，区分“服务尚未响应”和“配对失败”，避免误报不同网段
+- 从系统分享发送成功后停留在原生结果页，可继续发送、查看记录或返回设备列表
 - Android 收到内容时显示系统通知
 - Windows 关闭主窗口后缩小到系统托盘，仍可继续接收内容
 - Windows 收到文字或文件时显示托盘通知
@@ -64,6 +73,9 @@ Windows EXE 与 APK 当前均为未签名/开发签名构建，适合个人设�
 - DownloadManager 下载到系统 Downloads
 - 连接失败提示、刷新、返回连接页
 - 自动适配 LocalLink 响应式传输界面
+- “网络曙光控制舱”深色视觉系统，桌面端强调一屏掌控，手机端保留四页底部导航
+- 低干扰连接、成功和错误反馈音，可在双端界面中关闭并记忆设置
+- 背景信号光带与连接状态联动；系统关闭动画时自动使用静态效果
 
 接收内容保存在接收设备自己的 `LocalLinkData` 中。传输记录清晰展示发送端与接收端；文字可复制，文件可下载到系统 Downloads，记录支持搜索、筛选和删除。
 
@@ -111,15 +123,21 @@ adb install -r android\app\build\outputs\apk\debug\app-debug.apk
 配对码：123456
 ```
 
-Android 2.2 的 `53317` 端口默认用于手机本机收件箱。USB/ADB 反向端口属于源码兼容模式，使用前需先停止 Android 的 LocalLink 前台服务，避免端口冲突。LAN 互传无需 ADB。
+Android 2.4 的 `53317` 端口默认用于手机本机收件箱。USB/ADB 反向端口属于源码兼容模式，使用前需先停止 Android 的 LocalLink 前台服务，避免端口冲突。LAN 互传无需 ADB。
 
-### LocalLink 2.2 新功能
+### LocalLink 2.4 新功能
 
 1. 在主页点击“二维码”，同一局域网中的设备扫码即可连接。
 2. 点击“信任设备”后，该地址和配对码会保存在当前设备中，便于下次快速连接。
 3. 传输记录中的“预览”支持文字、图片、音视频、PDF、Markdown、JSON 和 CSV。
 4. Android 可从系统分享面板接收文字、链接、单个文件或多个文件。
 5. Windows 点击关闭按钮后服务进入系统托盘；托盘菜单可打开或更改接收目录，选择“退出并停止服务”才会关闭主机。
+6. 长文本使用三行摘要和专用全文阅读器；全文可复制或保存为 TXT。
+7. Windows 可预览 Office 转换后的 PDF；Android 使用系统兼容应用打开 Office 文件。
+8. APK 仅在用户点击“安装”后进入 Android 权限与系统安装确认流程。
+9. 连接流程会先检查 LocalLink 身份，再认证配对码，并核对已信任设备 ID；升级或重装造成身份变化时，手机端会要求重新信任后继续连接。
+10. PC/Web 与 Android 统一为近黑、钴蓝与青色信号体系；手机端保持主页、发送、记录、设备四个独立工作区。
+11. 增加克制的局域网信号背景动效、按钮状态反馈与可关闭音效，并尊重系统“减少动态效果”设置。
 
 二维码功能使用随程序离线分发的 QRCode.js，来源为 davidshimjs/qrcodejs，采用 MIT License；许可文本位于 `locallink/static/qrcodejs.LICENSE`。
 
@@ -160,3 +178,15 @@ python -m unittest discover -s tests -v
 ```
 
 协议细节与安全边界见 [protocol/protocol.md](protocol/protocol.md)。
+
+## 贡献
+
+欢迎提交 issue 和 Pull Request。参与前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+
+发现安全漏洞请勿公开披露，请按 [SECURITY.md](SECURITY.md) 的流程私下报告。
+
+## 许可证
+
+本项目以 [MIT License](LICENSE) 开源，版权归 LocalLink contributors 所有。
+
+二维码功能使用随程序离线分发的 [qrcodejs](https://github.com/davidshimjs/qrcodejs)（MIT License），许可文本见 `locallink/static/qrcodejs.LICENSE`。

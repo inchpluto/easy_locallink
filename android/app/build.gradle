@@ -8,8 +8,8 @@ android {
         applicationId 'app.locallink.mobile'
         minSdk 26
         targetSdk 35
-        versionCode 6
-        versionName '2.2.0'
+        versionCode 13
+        versionName '2.4.4'
     }
 
     buildTypes {
@@ -25,4 +25,9 @@ android {
     sourceSets {
         main.assets.srcDirs += ['../../locallink/static']
     }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.15.0'
+    testImplementation 'junit:junit:4.13.2'
 }

@@ -1,0 +1,57 @@
+name: Bug 报告
+description: 报告一个问题或异常行为
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告问题！请尽量提供详细信息，以便我们快速定位。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 发生了什么？预期应该是什么？
+      placeholder: 清晰描述问题现象与预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 如何复现这个问题？
+      placeholder: |
+        1. 打开...
+        2. 点击...
+        3. 观察到...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Windows EXE
+        - Android APP
+        - 源码运行（Python）
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 例如 2.4.4
+      placeholder: "2.4.4"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 如有错误日志、控制台输出或截图，请粘贴或拖拽到此处。
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 网络环境、系统版本等其他有助于排查的信息。

@@ -167,6 +167,27 @@ class ServerTests(unittest.TestCase):
             other.shutdown()
             other.server_close()
 
+    def test_device_identity_survives_server_restart(self):
+        data_dir = Path(self.temp.name) / "stable-host"
+        first = create_server(data_dir, "127.0.0.1", 0, "Stable PC", "123456")
+        first_id = first.device_id
+        first.server_close()
+
+        second = create_server(data_dir, "127.0.0.1", 0, "Stable PC", "123456")
+        try:
+            self.assertEqual(second.device_id, first_id)
+        finally:
+            second.server_close()
+
+    def test_different_data_directories_have_different_identities(self):
+        first = create_server(Path(self.temp.name) / "host-a", "127.0.0.1", 0, "A", "123456")
+        second = create_server(Path(self.temp.name) / "host-b", "127.0.0.1", 0, "B", "123456")
+        try:
+            self.assertNotEqual(first.device_id, second.device_id)
+        finally:
+            first.server_close()
+            second.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

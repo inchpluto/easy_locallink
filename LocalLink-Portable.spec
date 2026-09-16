@@ -5,7 +5,7 @@ a = Analysis(
     ['desktop_entry.py'],
     pathex=[],
     binaries=[],
-    datas=[('locallink\\static', 'locallink\\static')],
+    datas=[('locallink\\static', 'locallink\\static'), ('assets\\locallink.ico', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -14,6 +14,10 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+import sys
+sys.path.insert(0, SPECPATH)
+from packaging_runtime import fix_windows_runtime
+a.binaries = fix_windows_runtime(a.binaries)
 pyz = PYZ(a.pure)
 
 exe = EXE(

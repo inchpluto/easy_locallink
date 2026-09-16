@@ -3,28 +3,40 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#f4f6fa">
   <title>LocalLink · 本地传输</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/workspace.css">
 </head>
 <body>
+  <!--
+  THESIS: 局域网文件工作台，把内容查找与管理放在首位。
+  OWN-WORLD: 石墨导航、灰白工作面、蓝色操作；清晰分隔、日期索引、文件类型与消息正文分层。
+  STORY: 确认正在查看的主机，定位记录，阅读或预览，再选择保存或删除。
+  FIRST VIEWPORT: 左侧固定四项导航；右侧页标题、主机说明、搜索筛选、日期分组记录与分页。
+  FORM: Operate，候选七“文件索引工作台”，seed b148d6c0。桌面固定导航，手机底部四页。
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+  <div class="ambient-stage" aria-hidden="true"><i></i><i></i><i></i><span></span></div>
+  <a class="skip-link" href="#top">跳到主要内容</a>
   <header class="topbar">
-    <a class="brand" href="#top">LOCAL<span>/</span>LINK</a>
-    <nav><a href="#send">发送</a><a href="#historySection">记录</a><a href="#network">连接</a></nav>
+    <a class="brand" href="#top" aria-label="LocalLink 主页"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span>LOCAL<span>/</span>LINK</a>
+    <nav aria-label="主要导航"><a href="#top" data-view="home">概览</a><a href="#send" data-view="send">发送内容</a><a href="#historySection" data-view="history">传输记录</a><a href="#network" data-view="devices">设备与连接</a></nav>
+    <button id="soundButton" class="sound-toggle" type="button" aria-label="关闭界面声音" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 5 6.8 8.5H3v7h3.8L11 19V5Zm4 4.2c1.3 1.5 1.3 4.1 0 5.6M17.8 6c3.2 3.3 3.2 8.7 0 12"/></svg><span>声音</span></button>
     <div id="connection" class="connection"><i></i><b>连接中</b></div>
   </header>
 
-  <main id="top">
+  <main id="top" tabindex="-1">
+    <div id="connectionNotice" class="connection-notice hidden" role="status"></div>
     <section id="pairPanel" class="pair-screen hidden">
-      <div><span class="eyebrow">PRIVATE CONNECTION</span><h1>连接主机</h1><p>输入电脑端的 6 位配对码，数据只在本地链路中流转。</p></div>
+      <div><h1>连接本地链路</h1><p>输入主机显示的 6 位配对码。身份确认和内容传输都只发生在当前局域网。</p><div class="pair-signal" aria-hidden="true"><i></i><i></i><i></i><span>LOCAL CHANNEL</span></div></div>
       <form id="pairForm" class="pair-form"><label for="pairCode">配对码</label><input id="pairCode" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required><button class="primary" type="submit">连接</button></form>
     </section>
 
     <div id="app" class="hidden">
       <section class="overview">
-        <div class="overview-copy"><span class="eyebrow">LOCAL TRANSFER HUB</span><h1>简单、直接地<br>传到另一台设备。</h1><p>当前设备就是传输主机。收到的文字和文件会保存在这台设备的本地收件箱。</p><a class="primary inline" href="#send">开始传输</a></div>
+        <div class="overview-copy"><h1>在设备之间，<br>轻松传递。</h1><p>文字、照片和文件，直接送到当前连接的主机。传输完成后，前往记录继续阅读与管理。</p><div class="hero-actions"><a class="primary inline" href="#send">发送内容<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></a><a class="quiet-link" href="#historySection">查看传输记录</a></div></div>
         <aside class="host-card">
-          <div class="host-state"><i></i><span>服务正在运行</span></div>
+          <div class="host-state"><i></i><span>当前连接的主机</span><b>在线</b></div>
           <dl><div><dt>主机</dt><dd id="deviceName">—</dd></div><div><dt>访问地址</dt><dd id="deviceAddress">—</dd></div><div><dt>配对码</dt><dd id="pairingCode">—</dd></div></dl>
           <div class="host-actions"><button id="copyLinkButton" class="secondary" type="button">复制访问地址</button><button id="qrButton" class="secondary" type="button">二维码</button><button id="trustButton" class="secondary" type="button">信任设备</button></div>
         </aside>
@@ -33,36 +45,47 @@
       <section class="stats"><div><span>全部记录</span><strong id="statItems">0</strong></div><div><span>文件</span><strong id="statFiles">0</strong></div><div><span>占用空间</span><strong id="statStorage">0 B</strong></div><div><span>在线设备</span><strong id="statPeers">0</strong></div></section>
 
       <section id="send" class="section">
-        <header class="section-title"><div><span class="eyebrow">SEND</span><h2>发送内容</h2></div><p>发送成功后记录会自动标注发送端与接收端。</p></header>
+        <header class="section-title"><div><h2>发送内容</h2><p id="sendDestination">内容保存到当前连接的主机。</p></div><a class="secondary" href="#historySection">查看记录</a></header>
         <div class="send-grid">
-          <article class="panel"><div class="panel-title"><span>01</span><h3>文字与链接</h3></div><form id="textForm"><textarea id="textInput" maxlength="262144" placeholder="输入文字、网址或代码……" required></textarea><div class="form-row"><span id="charCount">0 / 262144</span><button class="primary" type="submit">发送文字</button></div></form></article>
-          <article class="panel"><div class="panel-title"><span>02</span><h3>文件与图片</h3></div><label id="dropZone" class="drop-zone"><input id="fileInput" type="file" multiple><b>＋</b><strong>选择文件</strong><small>电脑端也可拖放多个文件</small></label><div id="uploadQueue" class="upload-queue"></div></article>
+          <article class="panel text-panel"><div class="panel-title"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></span><div><h3>文字与链接</h3><small>最多 256 KB</small></div></div><form id="textForm"><label class="sr-only" for="textInput">要发送的文字或链接</label><textarea id="textInput" maxlength="262144" placeholder="输入文字、网址或代码……" required></textarea><div class="form-row"><span id="charCount">0 / 262144</span><button class="primary" type="submit">发送文字</button></div></form></article>
+          <article class="panel file-panel"><div class="panel-title"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4zM12 12v5m-2-2 2 2 2-2"/></svg></span><div><h3>文件与图片</h3><small>支持多文件与拖放</small></div></div><label id="dropZone" class="drop-zone"><input id="fileInput" type="file" multiple><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 16V5m-4 4 4-4 4 4M5 16v3h14v-3"/></svg><strong>选择或拖放文件</strong><small>内容直接发送到当前主机</small></label><div id="uploadQueue" class="upload-queue"></div></article>
         </div>
       </section>
 
       <section id="historySection" class="section soft">
-        <header class="section-title history-title"><div><span class="eyebrow">ACTIVITY</span><h2>传输记录</h2></div><div class="filters"><input id="historySearch" type="search" placeholder="搜索文件、内容或设备"><select id="historyFilter"><option value="all">全部</option><option value="file">文件</option><option value="text">文字</option></select><button id="refreshButton" class="secondary" type="button">刷新</button><button id="clearButton" class="secondary" type="button">清空记录</button></div></header>
-        <div class="history-head"><span>内容</span><span>传输方向</span><span>时间 / 大小</span><span>操作</span></div>
+        <header class="section-title history-title"><div><h2>传输记录</h2><p id="historyOwner">当前主机收到的文字与文件，都在这里。</p></div><a class="primary" href="#send">发送内容</a></header>
+        <div class="history-toolbar">
+          <div class="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><label class="sr-only" for="historySearch">搜索内容、文件名或设备</label><input id="historySearch" type="search" placeholder="搜索内容、文件名或设备" autocomplete="off"></div>
+          <label class="sr-only" for="historySort">排序</label><select id="historySort"><option value="newest">最新优先</option><option value="oldest">最早优先</option><option value="largest">文件大小</option></select>
+          <button id="refreshButton" class="secondary" type="button">刷新</button>
+        </div>
+        <div class="history-categories" id="historyCategories" role="group" aria-label="记录类型">
+          <button data-filter="all" aria-pressed="true">全部</button><button data-filter="text" aria-pressed="false">文字</button><button data-filter="image" aria-pressed="false">图片</button><button data-filter="documents" aria-pressed="false">文档</button><button data-filter="file" aria-pressed="false">所有文件</button><button data-filter="missing" aria-pressed="false">文件缺失</button>
+        </div>
+        <div class="history-summary"><span id="historyCount" role="status">正在读取记录</span><button id="resetHistory" class="text-button hidden" type="button">重置筛选</button><button id="clearButton" class="text-button danger-action" type="button">清空此主机内容</button></div>
         <div id="history" class="history"><div class="empty"><b>暂无记录</b><span>发送第一条内容后会显示在这里</span></div></div>
+        <nav class="history-pagination" aria-label="记录分页"><button id="historyPrevious" class="secondary" type="button">上一页</button><span id="historyPage">第 1 / 1 页</span><button id="historyNext" class="secondary" type="button">下一页</button></nav>
       </section>
 
       <section id="network" class="section network">
-        <header class="section-title"><div><span class="eyebrow">CONNECTION</span><h2>附近设备</h2></div><div><p id="networkHint">正在检测本地网络。</p><button id="scanButton" class="secondary" type="button">扫描当前网段</button></div></header>
+        <header class="section-title"><div><h2>链路与设备</h2></div><div><p id="networkHint">正在检测本地网络。</p><button id="scanButton" class="secondary" type="button">扫描当前网段</button></div></header>
         <div class="network-grid"><dl><div><dt>局域网</dt><dd id="lanState">检测中</dd></div><div><dt>Windows 防火墙</dt><dd id="firewallState">检测中</dd></div><div><dt>主机 IP</dt><dd id="networkIp">—</dd></div><div><dt>设备发现</dt><dd id="peerCount">0 台</dd></div><div><dt>VPN</dt><dd id="vpnState">检测中</dd></div></dl><div><div id="peers" class="peers"></div><div class="trusted-block"><h3>已信任设备</h3><div id="trustedDevices" class="peers"></div></div></div></div>
       </section>
 
       <nav id="mobileNav" class="mobile-bottom-nav" aria-label="手机功能导航">
-        <button type="button" data-view="home" class="active" aria-current="page"><span aria-hidden="true">⌂</span><b>主页</b></button>
-        <button type="button" data-view="send"><span aria-hidden="true">↗</span><b>发送</b></button>
-        <button type="button" data-view="history"><span aria-hidden="true">≡</span><b>记录</b></button>
-        <button type="button" data-view="devices"><span aria-hidden="true">◎</span><b>设备</b></button>
+        <button type="button" data-view="home" class="active" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 11 8-7 8 7v9h-6v-6h-4v6H4z"/></svg><b>主页</b></button>
+        <button type="button" data-view="send"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></svg><b>发送</b></button>
+        <button type="button" data-view="history"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><b>记录</b></button>
+        <button type="button" data-view="devices"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h7v6H4zM13 13h7v6h-7zM11 8h3a3 3 0 0 1 3 3v2M8 11v3a2 2 0 0 0 2 2h3"/></svg><b>设备</b></button>
       </nav>
     </div>
   </main>
   <footer>LocalLink · 数据保留在你的设备上</footer>
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-card"><header><h2 id="modalTitle">预览</h2><button id="modalClose" type="button" aria-label="关闭">×</button></header><div id="modalBody" class="modal-body"></div></div></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-card"><header><h2 id="modalTitle">预览</h2><button id="modalClose" type="button" aria-label="关闭"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><div id="modalBody" class="modal-body"></div></div></div>
   <div id="toast" role="status" aria-live="polite"></div>
+  <div id="pageAnnouncer" class="sr-only" role="status" aria-live="polite"></div>
   <script src="/static/qrcode.min.js"></script>
+  <script src="/static/connection-state.js"></script>
   <script src="/static/ui-model.js"></script>
   <script src="/static/app.js" defer></script>
 </body>

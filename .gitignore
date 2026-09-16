@@ -1,10 +1,65 @@
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 .pytest_cache/
-LocalLinkData/
-.ui-test/
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- PyInstaller / 构建产物 ----
 build/
 dist/
+*.spec.bak
+
+# ---- Android ----
 android/.gradle/
 android/app/build/
 android/local.properties
+android/.idea/
+android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+captures/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# ---- AI 助手 / 工具缓存 ----
+.cache/
+.codex/
+.agents/
+.impeccable/
+.superpowers/
+.tmp-android-35.jar
+.tmp-android-javac/
+.tmp-*
+
+# ---- UI 预览临时文件 ----
+.ui-preview-data/
+.ui-preview.err
+.ui-preview.out
+.ui-test/
+
+# ---- 运行时数据 ----
+LocalLinkData/
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+Desktop.ini

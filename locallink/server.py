@@ -4,6 +4,7 @@ import json
 import ipaddress
 import mimetypes
 import os
+import re
 import secrets
 import socket
 import threading
@@ -23,6 +24,31 @@ from .preview import LibreOfficeConverter, OfficePreviewService, PreviewError, f
 STATIC_ROOT = Path(__file__).parent / "static"
 
 
+def load_or_create_device_id(root: Path) -> str:
+    """Return a stable opaque host ID stored alongside LocalLink data."""
+    identity_file = root.resolve() / ".device-id"
+    try:
+        saved = identity_file.read_text(encoding="ascii").strip().lower()
+        if re.fullmatch(r"[0-9a-f]{16,64}", saved):
+            return saved
+    except OSError:
+        pass
+    generated = secrets.token_hex(8)
+    try:
+        with identity_file.open("x", encoding="ascii") as target:
+            target.write(generated)
+    except FileExistsError:
+        try:
+            saved = identity_file.read_text(encoding="ascii").strip().lower()
+            if re.fullmatch(r"[0-9a-f]{16,64}", saved):
+                return saved
+        except OSError:
+            pass
+    except OSError:
+        pass
+    return generated
+
+
 class LocalLinkServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -33,7 +59,7 @@ class LocalLinkServer(ThreadingHTTPServer):
         self.device_name = device_name
         self.advertised_ip = advertised_ip
         self.pairing_code = pairing_code
-        self.device_id = secrets.token_hex(8)
+        self.device_id = load_or_create_device_id(store.root)
         self.peers = PeerRegistry()
         self.firewall_state = "not_checked"
         self._diagnostic_cache = ({}, 0.0)

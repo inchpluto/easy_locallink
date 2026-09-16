@@ -41,6 +41,7 @@ LocalLink 的 MVP 只依赖局域网。互联网、账号系统和云端服务�
 | POST | `/api/text` | 发送 UTF-8 文本，最大 256 KB |
 | POST | `/api/upload` | 原始文件流上传 |
 | GET | `/api/download/{id}` | 下载文件，支持 HTTP Range |
+| GET | `/api/preview/{id}` | 浏览器安全内联预览；Office 可加 `format=pdf` |
 | DELETE | `/api/items/{id}` | 删除历史及对应文件 |
 
 上传请求头：
@@ -51,6 +52,25 @@ LocalLink 的 MVP 只依赖局域网。互联网、账号系统和云端服务�
 - `X-SHA256`: 可选；若提供，服务端写入后必须校验一致
 
 文件先写入 `.part`，长度和摘要校验成功后原子重命名。失败的临时文件会被清理。
+
+### 3.1 文件能力
+
+`/api/status` 的每条文件记录包含 `mime_type`、`category`、`actions` 和
+`installable`。操作值包括 `preview_inline`、`preview_convert`、`open_external`、
+`install` 与 `download`。客户端只按这些能力显示操作，避免各端自行猜测文件类型。
+
+Windows 的 `preview_convert` 使用本机 LibreOffice 无界面转换，默认最大 200 MB、
+超时 60 秒，并按记录 ID、大小和修改时间缓存 PDF。转换失败会删除 `.part` 文件。
+Android 不嵌入 Office 引擎，通过 FileProvider 临时授权给兼容应用。
+
+### 3.2 连接状态
+
+连接状态固定为 `idle → probing → authenticating → ready`，普通失败进入 `failed`，已认证但可信 ID 变化时进入可恢复的 `retrust_required`。
+探测阶段校验 `/api/health` 的 `service=locallink`，认证阶段请求受保护的
+`/api/status`。可信设备还会比较健康接口返回的设备 ID；若 ID 变化，返回
+`IDENTITY_CHANGED` 并停止自动发送。客户端必须先完成配对码认证，再提示用户明确重新信任；确认后更新可信设备 ID 并继续连接，取消则保持断开。
+
+可信记录以设备 ID 为主键，IP 和端口是可随发现结果更新的路由信息，配对码按设备分别保存。连接从休眠或长时间离线恢复时允许有限次数重试，但配对码错误和身份变化不得静默放行。
 
 ## 4. 多主机模型
 
@@ -65,3 +85,4 @@ LocalLink 的 MVP 只依赖局域网。互联网、账号系统和云端服务�
 - VPN 若在防火墙/WFP 层启用了 Block LAN/Kill Switch，应用层无法绕过，需在 VPN 中允许 LAN。
 - Android 会将 LocalLink 进程绑定到 Wi-Fi 网络，避免手机侧 VPN/移动数据分流。
 - 断点下载已通过 HTTP Range 支持；断点上传、E2E 加密属于后续协议版本。
+- EXE、MSI 和 APK 均不会静默执行；Windows SmartScreen/UAC 与 Android 系统安装确认不会被绕过。

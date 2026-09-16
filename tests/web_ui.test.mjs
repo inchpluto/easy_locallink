@@ -24,4 +24,22 @@ const missing = model.historyItem({
 });
 assert.deepEqual(missing.actions, ['delete']);
 
+const legacy = model.historyItem({id:'legacy',kind:'file'});
+assert.equal(legacy.sha256, '');
+assert.equal(legacy.size_human, '0 B');
+assert.equal(legacy.created_at, 0);
+assert.deepEqual(model.historyItem({id:'bad',kind:'file',actions:{download:true}}).actions,['download','delete']);
+assert.deepEqual(model.historyItem({id:'bad-text',kind:'text',actions:'read'}).actions,['read','copy','delete']);
+const records = Array.from({length:45}, (_,i)=>({id:String(i),kind:i%2?'text':'file',text:'会议笔记',name:`File ${i}`,created_at:i,size:i*10,category:i%2?'text':'image'}));
+const page = model.selectHistory(records,{page:2});
+assert.equal(page.items.length,20);
+assert.equal(page.items[0].id,'24');
+assert.equal(page.pages,3);
+assert.equal(model.selectHistory(records,{page:9}).page,3);
+assert.equal(model.selectHistory(records,{filter:'image'}).total,23);
+assert.equal(model.selectHistory(records,{query:' FILE 44 '}).total,1);
+assert.equal(model.selectHistory(records,{sort:'oldest'}).items[0].id,'0');
+assert.equal(model.selectHistory(records,{sort:'largest'}).items[0].id,'44');
+assert.equal(model.selectHistory([null,{id:'gone',kind:'file',available:false}],{filter:'missing'}).total,1);
+assert.equal(model.selectHistory([],{page:99}).page,1);
 console.log('web ui model tests passed');
