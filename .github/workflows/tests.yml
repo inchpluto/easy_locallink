@@ -44,13 +44,21 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
+      # ubuntu-latest images ship the Android SDK; no setup-android action.
+      # The project has no Gradle wrapper, so the preinstalled gradle is used.
+      - name: Android SDK environment
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+          command -v sdkmanager || echo "sdkmanager not on PATH"
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" 2>/dev/null || echo "no platforms dir"
+          gradle --version
       - name: Unit tests
         run: gradle --no-daemon testDebugUnitTest
