@@ -30,4 +30,7 @@ android {
 dependencies {
     implementation 'androidx.core:core:1.15.0'
     testImplementation 'junit:junit:4.13.2'
+    // Unit tests run against the stubbed android.jar, where org.json methods
+    // throw "not mocked".  A real org.json on the test classpath shadows it.
+    testImplementation 'org.json:json:20240303'
 }
