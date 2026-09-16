@@ -1,5 +1,6 @@
 package app.locallink.mobile;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.HashMap;
@@ -77,7 +78,7 @@ final class PairingThrottle {
         }
     }
 
-    JSONObject snapshot() {
+    JSONObject snapshot() throws JSONException {
         synchronized (lock) {
             int throttled = 0;
             for (long[] entry : failures.values()) if (delayFor(entry) > 0.0) throttled++;

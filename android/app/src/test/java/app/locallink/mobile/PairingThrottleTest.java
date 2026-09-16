@@ -3,6 +3,7 @@ package app.locallink.mobile;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import org.json.JSONException;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -78,7 +79,7 @@ public class PairingThrottleTest {
     }
 
     @Test
-    public void successClearsTheCounter() {
+    public void successClearsTheCounter() throws JSONException {
         FakeClock clock = new FakeClock();
         PairingThrottle throttle = throttle(clock, 1, 5.0, 60.0);
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -95,7 +96,7 @@ public class PairingThrottleTest {
     }
 
     @Test
-    public void staleEntriesAreForgotten() {
+    public void staleEntriesAreForgotten() throws JSONException {
         FakeClock clock = new FakeClock();
         PairingThrottle throttle = throttle(clock, 1, 5.0, 60.0);
         for (int attempt = 0; attempt < 3; attempt++) {
