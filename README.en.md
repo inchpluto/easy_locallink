@@ -211,6 +211,10 @@ Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING
 
 Please do not disclose security vulnerabilities publicly; follow the private reporting process in [SECURITY.md](SECURITY.md).
 
+## Contributors
+
+LocalLink is developed through human-AI collaboration. The contributor list is in [CONTRIBUTORS.md](CONTRIBUTORS.md) and includes the author [inchpluto](https://github.com/inchpluto) together with the AI tools Codex and DeepSeek.
+
 ## License
 
 This project is open source under the [MIT License](LICENSE), copyright the LocalLink contributors.
