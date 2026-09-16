@@ -1,5 +1,7 @@
 # LocalLink
 
+[简体中文](README.md) | [English](README.en.md)
+
 LocalLink 是一个不经过互联网的设备传输工具。Windows 与 Android 都可以成为局域网主机；手机、电脑可直接互相发现并发送文件、图片、链接和文字。
 
 ## 交付文件
