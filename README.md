@@ -185,6 +185,10 @@ python -m unittest discover -s tests -v
 
 发现安全漏洞请勿公开披露，请按 [SECURITY.md](SECURITY.md) 的流程私下报告。
 
+## 贡献者
+
+本项目为人机协作开发。贡献者名单见 [CONTRIBUTORS.md](CONTRIBUTORS.md)，包括作者 [inchpluto](https://github.com/inchpluto) 以及 AI 协作工具 Codex、DeepSeek。
+
 ## 许可证
 
 本项目以 [MIT License](LICENSE) 开源，版权归 LocalLink contributors 所有。
