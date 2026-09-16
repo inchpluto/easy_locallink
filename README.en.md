@@ -145,7 +145,12 @@ The QR code feature uses QRCode.js, distributed offline with the program. It com
 
 ## Running from source
 
-Requires Python 3.10+:
+Requires Python 3.10+. The transfer host is stdlib only; the desktop console
+additionally needs the packages in `requirements.txt`:
+
+```powershell
+python -m pip install -r requirements.txt
+```
 
 ```powershell
 python -m locallink --list-interfaces
@@ -175,9 +180,28 @@ gradle --no-daemon assembleDebug
 
 ## Testing
 
+Python server (stdlib only, no pytest required):
+
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+Frontend state machine and UI model (requires Node.js):
+
+```powershell
+node tests/connection_state.test.mjs
+node tests/web_ui.test.mjs
+```
+
+Android unit tests:
+
+```powershell
+cd android
+gradle --no-daemon testDebugUnitTest
+```
+
+All three run automatically on push and pull requests via
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
 See [protocol/protocol.md](protocol/protocol.md) for protocol details and security boundaries.
 

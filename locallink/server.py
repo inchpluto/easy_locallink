@@ -23,6 +23,13 @@ from .preview import LibreOfficeConverter, OfficePreviewService, PreviewError, f
 
 STATIC_ROOT = Path(__file__).parent / "static"
 
+# Inline previews share the console's origin, so anything a browser would
+# execute must never be served inline from here.  These types are forced to
+# download; everything else that is shown inline is additionally confined to a
+# unique origin by ``Content-Security-Policy: sandbox``.
+FORCED_DOWNLOAD_MIME_PREFIXES = ("text/html", "application/xhtml+xml", "text/javascript", "application/javascript")
+INLINE_SANDBOX_CSP = "sandbox"
+
 
 def load_or_create_device_id(root: Path) -> str:
     """Return a stable opaque host ID stored alongside LocalLink data."""
@@ -122,13 +129,24 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print(f"[{self.log_date_time_string()}] {self.client_address[0]} {fmt % args}")
 
-    def _headers(self, status: int, content_type: str, length: int, extra: dict | None = None) -> None:
+    def _headers(
+        self,
+        status: int,
+        content_type: str,
+        length: int,
+        extra: dict | None = None,
+        sandbox: bool = False,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        if sandbox:
+            # Confines the response to a unique origin: scripts, same-origin
+            # fetch() and storage are all unavailable to it.
+            self.send_header("Content-Security-Policy", INLINE_SANDBOX_CSP)
         if extra:
             for key, value in extra.items():
                 self.send_header(key, value)
@@ -164,6 +182,30 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
         if size <= 0 or size > max_bytes:
             raise ValueError("请求内容大小无效")
         return json.loads(self.rfile.read(size).decode("utf-8"))
+
+    def _drain_request_body(self, consumed: int) -> None:
+        """Read the rest of the declared request body.
+
+        Handlers that fail early leave the body unread, and with HTTP/1.1
+        keep-alive those bytes would be parsed as the start of the next
+        request.  Reading exactly ``Content-Length`` in total restores the
+        framing.  Bytes a client sent *beyond* its declared length are left
+        alone: at this layer they are indistinguishable from a correctly
+        pipelined next request, so the standard ``http.server`` behaviour of
+        rejecting the garbage request line and closing is the honest outcome.
+        """
+        try:
+            remaining = int(self.headers.get("Content-Length", "0")) - consumed
+        except ValueError:
+            remaining = 0
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            self.close_connection = True
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -219,10 +261,13 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         if not self._require_auth():
+            self._drain_request_body(0)
             return
+        consumed = 0
         try:
             if path == "/api/text":
                 payload = self._read_json()
+                consumed = int(self.headers.get("Content-Length", "0"))
                 record = self.server.store.add_text(
                     str(payload.get("text", "")),
                     str(payload.get("sender", "浏览器")),
@@ -241,6 +286,7 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
                 record = self.server.store.save_file(
                     self.rfile, filename, size, sender, sha256, self.server.device_name
                 )
+                consumed = max(size, 0)
                 self.server.notify_received(record)
                 self._json({"ok": True, "item": asdict(record)}, HTTPStatus.CREATED)
                 return
@@ -253,6 +299,8 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
         except OSError as exc:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"存储失败: {exc}")
+        finally:
+            self._drain_request_body(consumed)
 
     def do_DELETE(self) -> None:
         if not self._require_auth():
@@ -314,14 +362,26 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
                 self._headers(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE, "text/plain", 0, {"Content-Range": f"bytes */{total}"})
                 return
         length = end - start + 1
+        mime_type = mimetypes.guess_type(record.name)[0] or "application/octet-stream"
+        # A browser only honours Content-Disposition for top-level navigation,
+        # so inline <img>/<video>/<audio> previews keep working while opening
+        # the URL directly can no longer execute scriptable content.
+        forced_download = mime_type.startswith(FORCED_DOWNLOAD_MIME_PREFIXES)
+        disposition = "attachment" if forced_download or not inline else "inline"
         extra = {
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(record.name)}",
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(record.name)}",
             "ETag": f'"{record.sha256}"',
         }
         if status == HTTPStatus.PARTIAL_CONTENT:
             extra["Content-Range"] = f"bytes {start}-{end}/{total}"
-        self._headers(status, mimetypes.guess_type(record.name)[0] or "application/octet-stream", length, extra)
+        self._headers(
+            status,
+            mime_type,
+            length,
+            extra,
+            sandbox=inline and not forced_download,
+        )
         with path.open("rb") as source:
             source.seek(start)
             remaining = length
@@ -361,6 +421,7 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
             "application/pdf",
             len(body),
             {"Content-Disposition": f"inline; filename*=UTF-8''{quote(preview_name)}"},
+            sandbox=True,
         )
         self.wfile.write(body)
 
