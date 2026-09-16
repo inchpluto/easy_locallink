@@ -60,5 +60,33 @@ jobs:
           command -v sdkmanager || echo "sdkmanager not on PATH"
           ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" 2>/dev/null || echo "no platforms dir"
           gradle --version
+          # Annotations are readable through the API even when the raw log
+          # endpoint is unavailable, so surface the toolchain here too.
+          echo "::warning title=Android toolchain::ANDROID_HOME=${ANDROID_HOME:-unset} platforms=$(ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" 2>/dev/null | tr '\n' ',' ) gradle=$(gradle --version 2>/dev/null | awk '/^Gradle /{print $2}')"
       - name: Unit tests
         run: gradle --no-daemon testDebugUnitTest
+      # Publish test results as annotations: the raw log endpoint can be
+      # unreachable, and a silent red Android job is worse than no job.
+      - name: Report test results
+        if: always()
+        run: |
+          find . -path '*/test-results/*' -name '*.xml' -print
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(glob.glob('**/test-results/**/*.xml', recursive=True))
+          if not files:
+              print('::error title=Android tests produced no results::gradle never reached the test phase')
+          total = failed = 0
+          for path in files:
+              suite = ET.parse(path).getroot()
+              for case in suite.iter('testcase'):
+                  total += 1
+                  for problem in list(case):
+                      if problem.tag in ('failure', 'error'):
+                          failed += 1
+                          text = (problem.get('message') or problem.text or '').strip().splitlines()
+                          detail = text[0] if text else 'no message'
+                          print(f"::error title=Android test failed::{case.get('classname')} {case.get('name')}: {detail}")
+          if files:
+              print(f'::warning title=Android unit tests::ran={total} failed={failed}')
+          PY
