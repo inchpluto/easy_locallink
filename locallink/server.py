@@ -17,7 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .core import DiscoveryService, PeerRegistry, TransferStore, choose_lan_ip, network_diagnostics
+from .core import (
+    DiscoveryService,
+    PairingThrottle,
+    PeerRegistry,
+    TransferStore,
+    choose_lan_ip,
+    network_diagnostics,
+)
 from .preview import LibreOfficeConverter, OfficePreviewService, PreviewError, find_libreoffice
 
 
@@ -60,12 +67,22 @@ class LocalLinkServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, store: TransferStore, device_name: str, advertised_ip: str, pairing_code: str, on_receive=None):
+    def __init__(
+        self,
+        address,
+        store: TransferStore,
+        device_name: str,
+        advertised_ip: str,
+        pairing_code: str,
+        on_receive=None,
+        throttle: PairingThrottle | None = None,
+    ):
         super().__init__(address, LocalLinkHandler)
         self.store = store
         self.device_name = device_name
         self.advertised_ip = advertised_ip
         self.pairing_code = pairing_code
+        self.throttle = throttle if throttle is not None else PairingThrottle()
         self.device_id = load_or_create_device_id(store.root)
         self.peers = PeerRegistry()
         self.firewall_state = "not_checked"
@@ -125,9 +142,34 @@ class LocalLinkServer(ThreadingHTTPServer):
 class LocalLinkHandler(BaseHTTPRequestHandler):
     server: LocalLinkServer
     protocol_version = "HTTP/1.1"
+    # Status of the last rejection, or 0 when the request was accepted.  A 429
+    # deliberately leaves the request body unread, so callers must not drain it.
+    _rejection_status = 0
 
     def log_message(self, fmt: str, *args) -> None:
         print(f"[{self.log_date_time_string()}] {self.client_address[0]} {fmt % args}")
+
+    def send_response(self, code, message=None):
+        """Like the base implementation, but without the forced Connection: close.
+
+        ``BaseHTTPRequestHandler.send_response`` adds ``Connection: close`` for
+        every HTTP/1.1 response, so a rejected pairing attempt tore the
+        connection down — and HTTP clients silently retry those, turning one
+        wrong code into several.  Every response here carries a Content-Length,
+        so the framing is unambiguous and keep-alive stays valid.
+        """
+        if self.request_version != "HTTP/0.9":
+            if message is None:
+                if code in self.responses:
+                    message = self.responses[code][0]
+                else:
+                    message = ""
+            self.wfile.write(
+                f"{self.request_version} {code} {message}\r\n".encode("latin-1", "strict")
+            )
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.log_request(code)
 
     def _headers(
         self,
@@ -152,13 +194,13 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
                 self.send_header(key, value)
         self.end_headers()
 
-    def _json(self, payload, status: int = 200) -> None:
+    def _json(self, payload, status: int = 200, extra: dict | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self._headers(status, "application/json; charset=utf-8", len(body))
+        self._headers(status, "application/json; charset=utf-8", len(body), extra)
         self.wfile.write(body)
 
-    def _error(self, status: int, message: str) -> None:
-        self._json({"ok": False, "error": message}, status)
+    def _error(self, status: int, message: str, extra: dict | None = None) -> None:
+        self._json({"ok": False, "error": message}, status, extra)
 
     def _query(self) -> dict[str, list[str]]:
         return parse_qs(urlparse(self.path).query)
@@ -169,8 +211,28 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
         return secrets.compare_digest(query_code or header_code, self.server.pairing_code)
 
     def _require_auth(self) -> bool:
-        if self._authorized():
+        # Set before every _require_auth call so rejection handling can tell a
+        # 429 (body deliberately left unread) from any other rejection.
+        self._rejection_status = 0
+        source = self.client_address[0]
+        self.server.throttle.wait(source)
+        # Refuse before comparing: a throttled source must not be able to keep
+        # trying codes just because it is willing to sit through the backoff.
+        retry_after = self.server.throttle.retry_after(source)
+        if retry_after:
+            self.server.throttle.record(source, False)
+            self._rejection_status = HTTPStatus.TOO_MANY_REQUESTS
+            self._error(
+                HTTPStatus.TOO_MANY_REQUESTS,
+                "配对尝试过于频繁，请稍后重试",
+                {"Retry-After": str(retry_after)},
+            )
+            return False
+        authorized = self._authorized()
+        self.server.throttle.record(source, authorized)
+        if authorized:
             return True
+        self._rejection_status = HTTPStatus.UNAUTHORIZED
         self._error(HTTPStatus.UNAUTHORIZED, "配对码错误或已失效")
         return False
 
@@ -223,6 +285,7 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
                 "share_url": f"http://{self.server.advertised_ip}:{self.server.server_port}/?code={self.server.pairing_code}",
                 "network": {**self.server.diagnostics(), "firewall": self.server.firewall_state},
                 "peers": self.server.peers.list(self.server.device_id),
+                "auth": self.server.throttle.snapshot(),
                 "storage": self.server.store.stats(),
                 "history": self.server.store.list(
                     platform="windows",
@@ -261,7 +324,8 @@ class LocalLinkHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         if not self._require_auth():
-            self._drain_request_body(0)
+            if self._rejection_status != HTTPStatus.TOO_MANY_REQUESTS:
+                self._drain_request_body(0)
             return
         consumed = 0
         try:
@@ -434,6 +498,7 @@ def create_server(
     pairing_code: str | None = None,
     bind_all: bool = False,
     on_receive=None,
+    throttle: PairingThrottle | None = None,
 ) -> LocalLinkServer:
     lan_ip = choose_lan_ip(host)
     # Desktop hosts listen on every IPv4 interface so route changes caused by
@@ -442,7 +507,9 @@ def create_server(
     bind_ip = "0.0.0.0" if bind_all else lan_ip
     device_name = name or socket.gethostname() or "LocalLink"
     code = pairing_code or f"{secrets.randbelow(1_000_000):06d}"
-    return LocalLinkServer((bind_ip, port), TransferStore(data_dir), device_name, lan_ip, code, on_receive)
+    return LocalLinkServer(
+        (bind_ip, port), TransferStore(data_dir), device_name, lan_ip, code, on_receive, throttle
+    )
 
 
 def run_server(server: LocalLinkServer) -> None:

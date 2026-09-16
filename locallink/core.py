@@ -296,6 +296,99 @@ class TransferStore:
             return count
 
 
+class PairingThrottle:
+    """Slow down pairing-code guessing per source address.
+
+    A 6 digit code is roughly 20 bits of entropy, so an unthrottled endpoint can
+    be enumerated in seconds from anywhere on the LAN.  Every failed attempt
+    from an address doubles the delay before that address may try again, and
+    any attempt inside the delay window is refused without checking the code.
+    Throttling is per source address, so one guessing host cannot lock a
+    different device out.
+    """
+
+    def __init__(
+        self,
+        free_attempts: int = 5,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+        idle_forget: float = 900.0,
+        clock=time.monotonic,
+        sleep=time.sleep,
+    ) -> None:
+        self.free_attempts = max(1, free_attempts)
+        self.base_delay = max(0.0, base_delay)
+        self.max_delay = max(self.base_delay, max_delay)
+        self.idle_forget = idle_forget
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._entries: dict[str, dict] = {}
+        self.total_failures = 0
+
+    def _prune(self, now: float) -> None:
+        stale = [key for key, value in self._entries.items() if now - value["last"] > self.idle_forget]
+        for key in stale:
+            del self._entries[key]
+
+    def _delay_for(self, entry: dict | None) -> float:
+        """Cooldown owed by a source with ``entry`` recorded failures.
+
+        Exactly ``free_attempts`` wrong tries are compared against the code.
+        Once that many failures are recorded the source owes ``base_delay``
+        before its next try — and the caller refuses that try outright —
+        doubling on every further failure up to ``max_delay``.
+        """
+        if entry is None or entry["failures"] < self.free_attempts:
+            return 0.0
+        return min(
+            self.base_delay * (2 ** (entry["failures"] - self.free_attempts)),
+            self.max_delay,
+        )
+
+    def wait(self, source: str) -> float:
+        """Sleep out this source's cooldown; return how long was enforced."""
+        with self._lock:
+            now = self._clock()
+            self._prune(now)
+            delay = self._delay_for(self._entries.get(source))
+            if delay:
+                # Serialised on purpose: holding the lock across the sleep is
+                # what stops parallel workers from guessing concurrently.
+                self._sleep(delay)
+            return delay
+
+    def record(self, source: str, success: bool) -> None:
+        with self._lock:
+            now = self._clock()
+            if success:
+                self._entries.pop(source, None)
+                return
+            entry = self._entries.setdefault(source, {"failures": 0, "last": now})
+            entry["failures"] += 1
+            entry["last"] = now
+            self.total_failures += 1
+
+    def retry_after(self, source: str) -> int:
+        """Seconds of cooldown now owed by this source (for Retry-After).
+
+        Non-zero also means the caller should refuse the attempt outright: the
+        cooldown grows exponentially, so letting the guess through after the
+        sleep would still allow one attempt per backoff window at no cost.
+        """
+        with self._lock:
+            return int(self._delay_for(self._entries.get(source)) + 0.999)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "failed_attempts": self.total_failures,
+                "throttled_sources": sum(
+                    1 for value in self._entries.values() if self._delay_for(value) > 0
+                ),
+            }
+
+
 class PeerRegistry:
     def __init__(self, ttl: float = 12.0):
         self.ttl = ttl

@@ -3,9 +3,9 @@
 审计方式：在当前工作区实际运行 `locallink.server` 并发起真实 HTTP 请求验证，结论均可复现。
 所有行号基于提交 `ebf8f54`。
 
-**修复进度**：#1、#2、#8、#9、#10 已完成并带回归测试；
+**修复进度**：P0 三项（#1、#2、#3）与 #8、#9、#10 已完成并带回归测试；
 `python -m unittest discover -s tests` 现为 `Ran 33 tests ... OK (skipped=1)`。
-其余条目仍待处理，#3（配对码速率限制）建议下一个做。
+其余 P1/P2/P3 条目仍待处理，建议下一个做 #4（索引全量重写）或 #5（保留策略）。
 
 ## P0 安全
 
@@ -54,7 +54,7 @@ POST /api/upload  Content-Length: 100，实际发送 5000 字节  -> 201 Created
 > 超出声明长度的字节不做任何猜测，交由 `http.server` 按标准行为拒绝并断开。
 > 回归测试：`tests/test_server.py::KeepAliveFramingTests`。
 
-### 3. 配对码无速率限制，6 位数字可被暴力枚举
+### 3. 配对码无速率限制，6 位数字可被暴力枚举 ✅ 已修复
 
 实测 200 次错误配对码请求在 **0.14 秒** 内全部返回，无延迟、无锁定。
 `create_server` 用 `secrets.randbelow(1_000_000)` 生成，熵约 20 bit；
@@ -63,6 +63,15 @@ POST /api/upload  Content-Length: 100，实际发送 5000 字节  -> 201 Created
 
 建议：按来源 IP 失败计数 + 指数退避；配对码提到 8 位以上；
 `protocol/protocol.md` 已经承诺 3.0 做二维码公钥交换，值得优先。
+
+> 状态（2026-09-16）：速率限制已完成（`locallink/core.py::PairingThrottle`，
+> Java 侧 `PairingThrottle.java` 镜像实现）。前 5 次错误尝试正常比对，之后每次先退避
+> （1s 起翻倍、上限 60s）并在**比对配对码之前**直接返回 `429` + `Retry-After`。
+> 实测：默认参数下 12 次尝试耗时 123 秒（修复前 200 次 0.14 秒）。
+> 顺带修掉一个放大因素——`send_response` 原先对每个 HTTP/1.1 响应强制
+> `Connection: close`，客户端会静默重试，把一次错误配对放大成多次。
+> 配对码长度**未**改动：6 位与 Android 端默认 `123456`、UI 与文档均耦合，
+> 留给 3.0 的二维码公钥交换一并处理。
 
 ## P1 正确性与性能
 

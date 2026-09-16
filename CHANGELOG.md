@@ -4,6 +4,27 @@
 
 ## [未发布]
 
+### 安全
+
+- 内联预览与控制台同源时不再可执行脚本：`text/html`、`application/xhtml+xml`、
+  `text/javascript`、`application/javascript` 强制下载，其余内联响应加
+  `Content-Security-Policy: sandbox`。
+- 配对码失败尝试按来源地址指数退避，超过免费次数后直接返回 `429` 与 `Retry-After`，
+  且在比对配对码之前拒绝；Windows 与 Android 主机行为一致。
+
+### 修复
+
+- `do_POST` 读完声明的 `Content-Length` 剩余字节，提前返回的错误不再污染同一
+  keep-alive 连接上的下一条请求。
+- 不再对每个 HTTP/1.1 响应强制 `Connection: close`，避免客户端静默重试把一次
+  错误配对放大成多次。
+
+### 工程
+
+- 新增 `.github/workflows/tests.yml`（Python 3.10–3.12、Node 前端、Android 单元测试）
+  与 `requirements.txt`。
+- `python -m unittest discover -s tests` 由 22 个用例（1 失败 3 错误）恢复为全绿。
+
 ## [2.4.4] - 2026
 
 ### 新增

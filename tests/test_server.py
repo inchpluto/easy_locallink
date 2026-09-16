@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from locallink.core import PairingThrottle
 from locallink.server import create_server
 
 
@@ -334,6 +335,100 @@ class KeepAliveFramingTests(unittest.TestCase):
         self.assertIn(b"HTTP/1.1 201 Created", response)
         self.assertNotIn(b"HTTP/1.1 200 OK", response)
         self.assertNotIn(b'"pairing_code"', response)
+
+
+class PairingThrottleEndpointTests(unittest.TestCase):
+    """Guessing the pairing code over real HTTP must slow down and then stop."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.server = create_server(
+            Path(self.temp.name), "127.0.0.1", 0, "Test PC", "123456",
+            throttle=PairingThrottle(free_attempts=2, base_delay=0.05, max_delay=0.2),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def attempt(self, code: str):
+        try:
+            with urllib.request.urlopen(f"{self.base}/api/status?code={code}", timeout=5) as response:
+                return response.status, response.headers
+        except urllib.error.HTTPError as error:
+            return error.code, error.headers
+
+    def test_wrong_codes_are_throttled_with_retry_after(self):
+        # free_attempts=2: tries 1 and 2 are answered, try 3 is refused.
+        self.assertEqual(self.attempt("000000")[0], 401)
+        self.assertEqual(self.attempt("000001")[0], 401)
+
+        status, headers = self.attempt("000002")
+
+        self.assertEqual(status, 429)
+        self.assertGreaterEqual(int(headers["Retry-After"]), 1)
+        # The refusal is itself recorded, so the backoff keeps growing.
+        self.assertEqual(self.server.throttle.snapshot()["failed_attempts"], 3)
+
+    def test_throttled_source_still_cannot_reach_the_right_code(self):
+        for code in ("000000", "000001", "000002"):
+            self.attempt(code)
+        self.assertGreater(self.server.throttle.retry_after("127.0.0.1"), 0)
+
+        status, _ = self.attempt("123456")
+
+        # The correct code is not even compared once the source is throttled.
+        self.assertEqual(status, 429)
+
+    def test_the_correct_code_resets_the_counter(self):
+        # Still inside free_attempts, so the code is compared.
+        self.assertEqual(self.attempt("000000")[0], 401)
+
+        status, _ = self.attempt("123456")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(self.server.throttle.snapshot()["throttled_sources"], 0)
+
+    def test_429_leaves_the_connection_usable_or_cleanly_closed(self):
+        payload = json.dumps({"text": "hi", "sender": "Phone"}).encode()
+        for _ in range(3):
+            self.attempt("000000")
+        request = (
+            b"POST /api/text?code=000000 HTTP/1.1\r\n"
+            b"Host: test\r\nContent-Length: " + str(len(payload)).encode() + b"\r\n"
+            b"Content-Type: application/json\r\n\r\n" + payload
+            + b"GET /api/health HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+        )
+
+        connection = socket.create_connection(("127.0.0.1", self.server.server_port), timeout=10)
+        connection.settimeout(10)
+        try:
+            connection.sendall(request)
+            connection.shutdown(socket.SHUT_WR)
+            response = b""
+            while True:
+                data = connection.recv(65536)
+                if not data:
+                    break
+                response += data
+        finally:
+            connection.close()
+
+        self.assertIn(b"HTTP/1.1 429", response)
+        self.assertIn(b"Retry-After:", response)
+        # The unread body must never be parsed as a request line.
+        self.assertNotIn(b"501 Unsupported method", response)
+
+    def test_status_reports_auth_counters(self):
+        self.attempt("000000")
+        with urllib.request.urlopen(f"{self.base}/api/status?code=123456", timeout=5) as response:
+            body = json.loads(response.read())
+
+        self.assertEqual(body["auth"], {"failed_attempts": 1, "throttled_sources": 0})
 
 
 if __name__ == "__main__":
